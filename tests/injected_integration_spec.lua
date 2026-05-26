@@ -28,15 +28,14 @@ end
 
 describe("injected formatter", function()
   before_each(function()
-    -- require("conform.log").level = vim.log.levels.TRACE
+    --require("conform.log").level = vim.log.levels.TRACE
     conform.formatters_by_ft = {
-      lua = { "test_mark" },
-      html = { "test_mark" },
-      rust = { "test_mark" },
-      bash = { "test_mark" },
+      lua = { "stylua" },
+      nix = { "nixfmt" },
       sh = { "test_mark" },
     }
     -- A test formatter that bookends lines with "><" so we can check what was passed in
+
     conform.formatters.test_mark = {
       format = function(self, ctx, lines, callback)
         lines = vim.deepcopy(lines)
@@ -54,32 +53,54 @@ describe("injected formatter", function()
         callback(nil, lines)
       end,
     }
+    --    conform.formatters.nixfmt = require("conform.formatters.nixfmt")
+    conform.formatters.stylua = require("conform.formatters.stylua")
+    --    conform.formatters.shfmt = require("conform.formatters.shfmt")
   end)
 
   after_each(function()
     test_util.reset_editor()
   end)
 
+  -- check if stylua and nixfmt are available, if not skip the tests since we can't run them
+  if
+    not conform.get_formatter_info("stylua", 0).available
+    or not conform.get_formatter_info("nixfmt", 0)
+  then
+    return
+  end
+
   if vim.fn.has("nvim-0.11") == 0 then
     -- We need treesitter from 0.11 or newer for the injected formatter
     return
   end
-  for _, filename in ipairs(list_test_files("tests/injected")) do
-    local filepath = "./tests/injected/" .. filename
+  for _, filename in ipairs(list_test_files("tests/injected_integration")) do
+    local filepath = "./tests/injected_integration/" .. filename
     local formatted_file = filepath .. ".formatted"
     it(filename, function()
       local bufnr = vim.fn.bufadd(filepath)
       vim.fn.bufload(bufnr)
       local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, true)
       local config = assert(conform.get_formatter_config("injected", bufnr))
+
       local ctx = runner.build_context(bufnr, config)
-      local err, new_lines, done
+      local err, done, new_lines
       injected.format(injected, ctx, lines, function(e, formatted)
-        done = true
         err = e
-        new_lines = formatted
+        done = true
+        vim.api.nvim_buf_set_lines(bufnr, 0, -1, true, formatted)
+        conform.format({
+          bufnr = bufnr,
+          async = false,
+          formatter = { "nixfmt" },
+          lines = formatted,
+        }, function(ea, donea)
+          e = ea
+          new_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, true)
+          done = donea
+        end)
       end)
-      vim.wait(1000, function()
+      vim.wait(2000, function()
         return done
       end)
       assert(err == nil, err)
